@@ -1,0 +1,335 @@
+---
+title: "assessment 3 wine report"
+author: "yingchaozhao S4664370"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(knitr)
+library(ggplot2)
+library(skimr)
+library(dplyr)
+
+```
+-----------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------
+
+# EXECUTIVE SUMMARY 
+
+[This dataset illustrates the details of wine, for instances, the country, description, designation, points, price, province, taster_name, title, variety and winery. From this business report, it will argues which factor affects the rating of the wine. We will focus on the analysis from two aspects. One is the relationship between the country and the point, another is the relationship between the price and the points. ]
+
+-----------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------
+
+# INTRODUCTION
+
+[This dataset is a wine-enthusiast ratings dataset from Feorgios Karamanis sharing from Kaggle. In recent years, healthy diet is the most important thing for individuals. Wine is becoming more and more popular at wine tables.Many people are also very concerned about the price, origin and rating of the wine.]
+
+-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------
+
+# BUSINESS PROBLEM
+
+[This report will explore if the country of a wine and the points of a wine will affect a wine's rating or points can be predicted.]
+
+**Major Question:** Can we determine which major factors significantly influencing the wine enthusiast’s ratings?
+
+**_Sub-questions:_**
+
+Q1. Can we predict how the price affects the overall wine rating?
+
+Q2. Which of the wine characteristics affect the overall wine rating? 
+
+-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------
+
+# ABOUT THE DATASET [wine_rating]
+
+The dataset shows how many factors can affect the rating of a wine. 
+
+## Load the dataset
+
+```{r}
+wine_ratings <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-05-28/winemag-data-130k-v2.csv")
+
+```
+
+## Data Analysis
+
+### 1. It is important to change the "character" variables into a "factor" for better analysis.
+
+```{r}
+wine_ratings <- wine_ratings %>%
+  mutate_if(is.character, factor)
+
+```
+
+### 2. let's see some details from this data. 
+
+```{r}
+skim(wine_ratings)
+```
+
+```{r}
+summary(wine_ratings)
+```
+
+From the data we can see that there are 3 columns of numeric value and 11 columns of factor value. On price column, it has 8996 missing value and more than 9%.We will remove the value.  
+
+Before we start to find the relations, we will create a new variable and divide the 'points' column to 3 levels. The points > 95, the name is 'excellent',  points < 85, named 'average', 85 < points < 95, named 'good'. 
+
+```{r}
+new_wine_ratings <- wine_ratings %>%
+  mutate(new_wine_ratings = case_when(points > 95 ~ 'excellent',  points < 85 ~ 'average', TRUE ~'good'))
+
+new_wine_ratings %>%
+  count(new_wine_ratings) %>%
+  kable()
+
+```
+We can see that there are 12430 valus of 'average', 116660 valus of 'good', 881 valus of 'excellent'. 
+
+
+### Can we predict how the price affects the overall wine rating?
+
+To find this relation, let's plot the `price` as X-axis and `points` as Y-axis. We then use the linear regression to see how they are related.
+
+```{r}
+new_wine_ratings %>%
+  ggplot(aes(price, points), na.rm = TRUE) +
+  geom_point(, na.rm = TRUE) +
+  geom_smooth(method = lm, se = FALSE, na.rm = TRUE) +
+  scale_x_continuous(limits=c(80,100))+
+  scale_y_continuous(limits=c(0,500)) 
+
+```
+
+We can see that new_wine_ratings that were larger in price at the start of the experiment tend to have wider body at the end. The slope of the line shows a positive relation between the `price` and the `points`.
+
+### Is the relation between the `price` and `points` dependent on `wine_rating`? 
+
+Now, let's see if the above identified positive relation is dependent on the different pattern - `new_wine_rating`. 
+
+```{r}
+new_wine_ratings %>%
+  ggplot(aes(price, points, colour = new_wine_ratings), na.rm = TRUE) +
+  geom_point( , na.rm = TRUE) +
+  geom_smooth(formula = y ~ x, method = "lm", na.rm = TRUE) +
+  scale_y_continuous(limits=c(80,100)) +
+  scale_x_continuous(limits=c(0,500)) +
+  scale_color_viridis_d(option = "plasma", end = .7) +
+  labs(x = "price", y = "points", colour = "new_wine_ratings", title = "wine tasting result")
+```
+
+We can see that all the slopes show a positive relation. However, these slopes look different. According to the graph, two lines intersect at a single point. Price around 225 and points around 97. This point could be used as utility maximization which illustrates that wines in this combination are the most popular price and point.   
+
+This also goes on to show that we can predict the correct `wine_rating` to bring a wine of `price` to a certain of`points`.
+
+-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------
+
+# PREDICTIVE ANALYSIS
+
+## **Model 1:** Predict final `width` using Linear Model
+
+From our descriptive analysis, we have found that the rating of a wine can be predicted by knowing their `price` and `points`. We will now build a model to make these predictions.
+
+
+
+### Step 1: Split the dataset into Training & Testing datasets.
+
+```{r}
+new_wine_ratings_split <- initial_split(new_wine_ratings)
+new_wine_ratings_train <- training(new_wine_ratings_split)
+new_wine_ratings_test <- testing(new_wine_ratings_split)
+
+```
+
+### Step 2: Pre-process the data.
+
+#### 2.1 Set the recipe & get the ingredients - `recipe()`
+
+For this modelling, we do not need all variables, therefore we will only select several columns we use from the dataset. 
+
+Since we are predicting the final price of the wine, `points` is our **Output variable** and the others are our **Input variables** or **Predictors**.
+
+```{r}
+new_wine_ratings_recipe1 <- recipe(points ~ ., data = new_wine_ratings_train) 
+
+summary(new_wine_ratings_recipe1)
+
+```
+
+#### 2.2 Write the recipe steps - `step_xxx()`
+
+Success of modelling depends on the "quality" of data. To ensure this quality, there are few transformations that are necessary in our dataset.
+
+- Whenever we have numeric values in our dataset, to avoid the **outliers** we need to normalise it by **"Centering"** & **"Scalling"** - [`step_center()` & `step_scale()`]
+
+- We also need to remove any numeric variables that are closely related (=correlated) - [`step_corr()`]
+
+```{r}
+new_wine_ratings_recipe1 <- new_wine_ratings_recipe1 %>%
+  # Normalises numeric data to have a mean of zero
+  step_center(all_numeric(), -all_outcomes()) %>% 
+  # Normalizes numeric data to have a standard deviation of one
+  step_scale(all_numeric(), -all_outcomes()) %>% 
+  # removes variables that are too closely related
+  step_corr(all_numeric())
+
+```
+
+#### 2.3 Get ready with the prep - `prep()`
+
+```{r}
+new_wine_ratings_prep1 <- prep(new_wine_ratings_recipe1, training = new_wine_ratings_train)
+
+```
+#### 2.4 Bake the recipe - `bake()`
+
+```{r}
+new_wine_ratings_bake1 <- bake(new_wine_ratings_prep1, new_wine_ratings_train)
+
+summary(new_wine_ratings_bake1)
+```
+
+### Step 3: Build a model
+
+[**For this modelling, our Output variable is Numeric. So, we will use Linear Modelling `lm()`.**]
+
+```{r}
+ggplot(new_wine_ratings, aes( price, points)) +
+  geom_point(, na.rm = TRUE) +
+  stat_smooth(, na.rm = TRUE)
+
+cor(new_wine_ratings$price, new_wine_ratings$points, use = "complete.obs")
+
+model1 <- lm(price ~ points, data = new_wine_ratings)
+
+summary(model1)
+
+
+```
+
+### Step 3: Evaluate the model
+
+[Write briefly about your evaluation of this model using P-value, Residuals and R-squared.]
+
+
+-----------------------------------------------------------------------------------------------------
+
+
+
+## **Model 2:** Predict `rating`` using randomForest
+
+From our descriptive analysis, we also found that we can predict wine characteristics affect the overall wine rating. We will now build a model to make these predictions.
+
+
+### Step 1: Split the dataset into Training & Testing datasets.
+
+We will use the same training and testing dataset created earlier for Model 1. So, no need to recreate.
+
+
+### Step 2: Pre-process the data.
+
+#### 2.1 Set the recipe & get the ingredients - `recipe()`
+
+For this modelling, we will use all the 3 variables from the dataset.
+
+Since we are predicting the country of the wine, `country` is our **Output variable** and the others are our **Input variables** or **Predictors**.
+
+```{r}
+new_wine_ratings_recipe2 <- recipe(country ~ ., data = new_wine_ratings_train) 
+
+summary(new_wine_ratings_recipe2)
+```
+
+#### 2.2 Write the recipe steps - `step_xxx()`
+
+Success of modelling depends on the "quality" of data. To ensure this quality, there are few transformations that are necessary in our dataset.
+
+- Whenever we have numeric values in our dataset, to avoid the **outliers** we need to normalise it by **"Centering"** & **"Scalling"** - [`step_center()` & `step_scale()`]
+
+- We also need to remove any numeric variables that are closely related (=correlated) - [`step_corr()`]
+
+```{r}
+new_wine_ratings_recipe2 <- new_wine_ratings_recipe2 %>%
+  # Normalises numeric data to have a mean of zero
+  step_center(all_numeric(), -all_outcomes()) %>% 
+  # Normalizes numeric data to have a standard deviation of one
+  step_scale(all_numeric(), -all_outcomes()) %>% 
+  # removes variables that are too closely related
+  step_corr(all_numeric())
+
+
+```
+
+#### 2.3 Get ready with the prep - `prep()`
+
+```{r}
+new_wine_ratings_prep2 <- prep(new_wine_ratings_recipe2, training = new_wine_ratings_train)
+
+```
+
+#### 2.4 Bake the recipe - `bake()`
+
+```{r}
+new_wine_ratings_bake2 <- bake(new_wine_ratings_prep2, new_wine_ratings_train)
+
+
+```
+
+### Step 3: Build a model
+
+[**For this modelling, our Output variable is a Character/Factor. So, we will use `randomForest()`.**]
+
+```{r}
+#install.packages("randomForest")
+library(randomForest)
+
+modelRF1 <- randomForest(country ~ new_wine_ratings , data = new_wine_ratings, na.action = na.omit)
+
+print(modelRF1)
+
+```
+
+
+### Step 3: Evaluate the model
+
+[From the data set we can see, when I use 'new_wine_ratings' column to predict a country, it shows that the estimate of error rate is 58.04%. That is to say, this result is inaccurate forecast]
+
+-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------
+
+
+# FINDINGS & CONCLUSION
+
+[In our example, both the p-values for the intercept and the predictor variable are highly significant, so we can reject the null hypothesis and accept the alternative hypothesis, which means that there is a significant association between the predictor and the outcome variables.Yes, the price will affect the rating.Based on the result show, we are able to predict the rating via points.Other Characteristic like country will also affect the ratings.The best price should be around $225 with a points of 97.]
+
+-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------
+
+# RECOMMENDATIONS
+
+[Based on our analysis, we do recommend everyone to pick the wine around the price $200 -$225 and at least with a point of 95 and above for the best result. ]
+
+-----------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------
+
+
+
+
+
+
+
+
+
